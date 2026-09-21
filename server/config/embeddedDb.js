@@ -1,12 +1,18 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const DATA_DIR = isServerless ? path.join(os.tmpdir(), 'data') : path.join(__dirname, '..', 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (e) {
+  // Gracefully handle read-only file systems (e.g. AWS Lambda / Vercel Serverless)
 }
 
 let memoryDb = {

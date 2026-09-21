@@ -156,8 +156,8 @@ class RunnerService {
       throw new Error('No Python web entry point (app.py, main.py, server.py) found in repository.');
     }
 
-    // Prepare temp directory
-    const tempDir = path.join(__dirname, '..', 'temp_runners', `${repoId}_${branch}`);
+    // Prepare temp directory (using os.tmpdir() for serverless / cloud safety)
+    const tempDir = path.join(require('os').tmpdir(), 'temp_runners', `${repoId}_${branch}`);
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }

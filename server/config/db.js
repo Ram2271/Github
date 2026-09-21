@@ -15,7 +15,7 @@ async function connectDB() {
   }
 
   try {
-    if (uri.startsWith('mongodb+srv://')) {
+    if (uri.startsWith('mongodb+srv://') && process.platform === 'win32') {
       try {
         dns.setServers(['8.8.8.8', '1.1.1.1']);
       } catch (_) {}

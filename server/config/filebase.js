@@ -28,10 +28,18 @@ if (isConfigured) {
   console.log('[Storage] Active: Local storage emulator (preserving exact S3 keys under server/storage/buckets/).');
 }
 
-// Local storage fallback directory
-const LOCAL_STORAGE_DIR = path.join(__dirname, '..', 'storage', 'buckets', FILEBASE_BUCKET);
-if (!fs.existsSync(LOCAL_STORAGE_DIR)) {
-  fs.mkdirSync(LOCAL_STORAGE_DIR, { recursive: true });
+// Local storage fallback directory (uses os.tmpdir() in serverless environments)
+const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const LOCAL_STORAGE_DIR = isServerless
+  ? path.join(require('os').tmpdir(), 'storage', 'buckets', FILEBASE_BUCKET)
+  : path.join(__dirname, '..', 'storage', 'buckets', FILEBASE_BUCKET);
+
+try {
+  if (!fs.existsSync(LOCAL_STORAGE_DIR)) {
+    fs.mkdirSync(LOCAL_STORAGE_DIR, { recursive: true });
+  }
+} catch (e) {
+  // Gracefully handle read-only file systems (e.g. AWS Lambda / Vercel Serverless)
 }
 
 // Convert stream to buffer
