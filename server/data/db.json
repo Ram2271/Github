@@ -1,0 +1,31 @@
+{
+  "users": [
+    {
+      "_id": "7b67dd3ec934145d8b8eae2e",
+      "username": "rambh",
+      "email": "rambid52@gmail.com",
+      "password": "$2a$10$msoVZRhSVxIRTjN8.6sgY.Kh6zDttU8i.lVnI4xKPbxUfzGMFVFki",
+      "name": "rambh",
+      "bio": "",
+      "avatarUrl": "https://api.dicebear.com/7.x/identicon/svg?seed=rambh",
+      "company": "",
+      "location": "",
+      "website": "",
+      "twitter": "",
+      "followers": [],
+      "following": [],
+      "starredRepos": [],
+      "createdAt": "2026-09-21T13:58:23.954Z",
+      "updatedAt": "2026-09-21T13:58:23.954Z"
+    }
+  ],
+  "repositories": [],
+  "commits": [],
+  "branches": [],
+  "files": [],
+  "issues": [],
+  "pullRequests": [],
+  "notifications": [],
+  "activities": [],
+  "verificationCodes": []
+}

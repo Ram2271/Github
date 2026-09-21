@@ -1,0 +1,27 @@
+{
+  "name": "github-clone-platform",
+  "version": "1.0.0",
+  "description": "Production-quality GitHub-style code hosting platform with Filebase S3, MongoDB, and Web Project Runner",
+  "scripts": {
+    "build": "cd client && npm install && npm run build",
+    "start": "node server/index.js",
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install"
+  },
+  "keywords": ["github", "filebase", "mongodb", "runner"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.750.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "diff": "^5.2.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "iconv-lite": "^0.7.3",
+    "jsonwebtoken": "^9.0.2",
+    "mime-types": "^2.1.35",
+    "mongoose": "^8.9.5",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^10.0.10"
+  }
+}
