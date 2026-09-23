@@ -45,7 +45,16 @@ function getDriveClient() {
   try {
     const { google } = require('googleapis');
 
-    if (isServiceAccountConfigured) {
+    if (isOAuthConfigured) {
+      const oauth2Client = new google.auth.OAuth2(
+        GOOGLE_CLIENT_ID,
+        GOOGLE_CLIENT_SECRET,
+        'http://localhost:3000/oauth2callback'
+      );
+      oauth2Client.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
+      driveClient = google.drive({ version: 'v3', auth: oauth2Client });
+      console.log('[Storage] ✅ Google Drive client initialized (OAuth2 - Personal 15GB Quota)');
+    } else if (isServiceAccountConfigured) {
       // Format private key properly, handling escaped \n in .env files
       const privateKey = GOOGLE_PRIVATE_KEY.includes('\\n')
         ? GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
@@ -59,15 +68,6 @@ function getDriveClient() {
 
       driveClient = google.drive({ version: 'v3', auth: authClient });
       console.log('[Storage] ✅ Google Drive client initialized (Service Account:', GOOGLE_SERVICE_ACCOUNT_EMAIL + ')');
-    } else if (isOAuthConfigured) {
-      const oauth2Client = new google.auth.OAuth2(
-        GOOGLE_CLIENT_ID,
-        GOOGLE_CLIENT_SECRET,
-        'https://developers.google.com/oauthplayground'
-      );
-      oauth2Client.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
-      driveClient = google.drive({ version: 'v3', auth: oauth2Client });
-      console.log('[Storage] ✅ Google Drive client initialized (OAuth2)');
     }
 
     return driveClient;
@@ -98,6 +98,8 @@ async function findDriveFileByKey(drive, key) {
     const query = `'${GOOGLE_DRIVE_FOLDER_ID}' in parents and appProperties has { key='key' and value='${key}' } and trashed = false`;
     const res = await drive.files.list({
       q: query,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
       fields: 'files(id, name, webViewLink, webContentLink, size, md5Checksum, mimeType)',
       spaces: 'drive',
       pageSize: 1
@@ -171,6 +173,7 @@ const googleDriveStorage = {
       } else {
         // Create new file inside the dedicated Google Drive folder
         const res = await drive.files.create({
+          supportsAllDrives: true,
           requestBody: {
             name: fileName,
             parents: [GOOGLE_DRIVE_FOLDER_ID],
