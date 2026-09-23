@@ -4,7 +4,7 @@ const Branch = require('../models/Branch');
 const FileNode = require('../models/FileNode');
 const Commit = require('../models/Commit');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
-const filebaseService = require('../services/filebaseService');
+const storageService = require('../services/storageService');
 
 const router = express.Router();
 
@@ -64,9 +64,9 @@ router.post('/:owner/:repo/branches', requireAuth, async (req, res) => {
     const sourceFiles = await FileNode.find({ repoId: String(repo._id), branch: sourceBranch });
     for (const file of sourceFiles) {
       const { _id, ...rest } = file;
-      // Copy in Filebase S3
+      // Copy in Cloud Storage
       try {
-        const uploadRef = await filebaseService.duplicateFileToBranch(
+        const uploadRef = await storageService.duplicateFileToBranch(
           String(repo._id),
           sourceBranch,
           cleanName,

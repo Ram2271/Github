@@ -70,7 +70,7 @@ export default function Home() {
             <div className="bg-gh-surface border border-gh-border rounded-lg p-5 space-y-3 text-xs text-center">
               <h3 className="text-base font-semibold text-gh-text">Welcome to GitHub</h3>
               <p className="text-gh-muted leading-relaxed">
-                The open-source code platform powered by Filebase S3 object storage and MongoDB with an integrated live web project runner.
+                The open-source code platform powered by Google Drive cloud storage and MongoDB with an integrated live web project runner.
               </p>
               <div className="pt-2 flex flex-col gap-2">
                 <Link

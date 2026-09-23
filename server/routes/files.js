@@ -7,9 +7,9 @@ const Branch = require('../models/Branch');
 const FileNode = require('../models/FileNode');
 const Commit = require('../models/Commit');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
-const filebaseService = require('../services/filebaseService');
+const storageService = require('../services/storageService');
 const gitService = require('../services/gitService');
-const filebaseStorage = require('../config/filebase');
+const googleDriveStorage = require('../config/googleDrive');
 const runnerService = require('../services/runnerService');
 
 const router = express.Router();
@@ -101,7 +101,7 @@ router.get(['/:owner/:repo/tree/:branch', '/:owner/:repo/tree/:branch/*'], optio
     let readmeContent = null;
     if (readmeFile) {
       try {
-        const fileObj = await filebaseService.getFile(String(repo._id), branchName, readmeFile.path);
+        const fileObj = await storageService.getFile(String(repo._id), branchName, readmeFile.path);
         readmeContent = fileObj.buffer.toString('utf8');
       } catch (_) {}
     }
@@ -142,7 +142,7 @@ router.get('/:owner/:repo/blob/:branch/*', optionalAuth, async (req, res) => {
     }
 
     // Retrieve file buffer from Filebase
-    const fileObj = await filebaseService.getFile(String(repo._id), branchName, filePath);
+    const fileObj = await storageService.getFile(String(repo._id), branchName, filePath);
     const isBinary = fileObj.contentType.startsWith('image/') ||
       fileObj.contentType.startsWith('audio/') ||
       fileObj.contentType.startsWith('video/') ||
@@ -173,7 +173,7 @@ router.get('/:owner/:repo/raw/:branch/*', optionalAuth, async (req, res) => {
     const branchName = req.params.branch;
     const filePath = (req.params[0] || '').replace(/^\/+/, '');
 
-    const fileObj = await filebaseService.getFile(String(repo._id), branchName, filePath);
+    const fileObj = await storageService.getFile(String(repo._id), branchName, filePath);
     res.setHeader('Content-Type', fileObj.contentType);
     res.setHeader('Content-Length', fileObj.contentLength);
     res.send(fileObj.buffer);
@@ -218,7 +218,7 @@ router.post(['/:owner/:repo/upload', '/:owner/:repo/upload/:branch'], requireAut
       const mimeType = file.mimetype || mime.lookup(relPath) || 'application/octet-stream';
 
       // 1. Upload to Filebase S3, preserving complete repository path
-      const storageRef = await filebaseService.uploadFile(
+      const storageRef = await storageService.uploadFile(
         String(repo._id),
         branch,
         relPath,
@@ -327,7 +327,7 @@ router.post('/:owner/:repo/create', requireAuth, async (req, res) => {
     const mimeType = mime.lookup(cleanPath) || 'text/plain';
 
     // 1. Upload to Filebase S3
-    const storageRef = await filebaseService.uploadFile(
+    const storageRef = await storageService.uploadFile(
       String(repo._id),
       branch,
       cleanPath,
@@ -398,14 +398,14 @@ router.put('/:owner/:repo/edit', requireAuth, async (req, res) => {
     // Get old content for diff
     let oldContent = '';
     try {
-      const oldObj = await filebaseService.getFile(String(repo._id), branch, sourcePathForOld);
+      const oldObj = await storageService.getFile(String(repo._id), branch, sourcePathForOld);
       oldContent = oldObj.buffer.toString('utf8');
     } catch (_) {}
 
     const { additions, deletions, patch } = gitService.computeDiff(oldContent, content, cleanPath);
 
     // 1. Upload updated content to Filebase S3
-    const storageRef = await filebaseService.uploadFile(
+    const storageRef = await storageService.uploadFile(
       String(repo._id),
       branch,
       cleanPath,
@@ -416,7 +416,7 @@ router.put('/:owner/:repo/edit', requireAuth, async (req, res) => {
     // 2. If renamed, delete old file from Filebase and DB
     if (isRename) {
       try {
-        await filebaseService.deleteFile(String(repo._id), branch, cleanOldPath);
+        await storageService.deleteFile(String(repo._id), branch, cleanOldPath);
       } catch (_) {}
       await FileNode.deleteOne({ repoId: String(repo._id), branch, path: cleanOldPath });
     }
@@ -531,11 +531,11 @@ router.post('/:owner/:repo/rename', requireAuth, async (req, res) => {
 
     if (fileNode) {
       // Single file rename
-      const fileObj = await filebaseService.getFile(String(repo._id), branch, oldPath);
+      const fileObj = await storageService.getFile(String(repo._id), branch, oldPath);
       const mimeType = mime.lookup(newPath) || fileNode.mimeType || 'text/plain';
 
       // Upload to new path
-      const storageRef = await filebaseService.uploadFile(
+      const storageRef = await storageService.uploadFile(
         String(repo._id),
         branch,
         newPath,
@@ -545,7 +545,7 @@ router.post('/:owner/:repo/rename', requireAuth, async (req, res) => {
 
       // Delete old from Filebase
       try {
-        await filebaseService.deleteFile(String(repo._id), branch, oldPath);
+        await storageService.deleteFile(String(repo._id), branch, oldPath);
       } catch (_) {}
 
       // Replace FileNode
@@ -584,10 +584,10 @@ router.post('/:owner/:repo/rename', requireAuth, async (req, res) => {
       for (const f of matchingFiles) {
         const subPath = f.path.substring(folderPrefix.length);
         const itemNewPath = `${newPath}/${subPath}`;
-        const fileObj = await filebaseService.getFile(String(repo._id), branch, f.path);
+        const fileObj = await storageService.getFile(String(repo._id), branch, f.path);
         const mimeType = mime.lookup(itemNewPath) || f.mimeType || 'text/plain';
 
-        const storageRef = await filebaseService.uploadFile(
+        const storageRef = await storageService.uploadFile(
           String(repo._id),
           branch,
           itemNewPath,
@@ -596,7 +596,7 @@ router.post('/:owner/:repo/rename', requireAuth, async (req, res) => {
         );
 
         try {
-          await filebaseService.deleteFile(String(repo._id), branch, f.path);
+          await storageService.deleteFile(String(repo._id), branch, f.path);
         } catch (_) {}
 
         await FileNode.deleteOne({ repoId: String(repo._id), branch, path: f.path });
@@ -663,7 +663,7 @@ router.delete('/:owner/:repo/delete', requireAuth, async (req, res) => {
     if (fileNode) {
       // Delete single file from Filebase S3
       try {
-        await filebaseService.deleteFile(String(repo._id), branch, cleanPath);
+        await storageService.deleteFile(String(repo._id), branch, cleanPath);
       } catch (_) {}
 
       // Delete FileNode
@@ -691,7 +691,7 @@ router.delete('/:owner/:repo/delete', requireAuth, async (req, res) => {
 
       for (const f of filesInFolder) {
         try {
-          await filebaseService.deleteFile(String(repo._id), branch, f.path);
+          await storageService.deleteFile(String(repo._id), branch, f.path);
         } catch (_) {}
         await FileNode.deleteOne({ repoId: String(repo._id), branch, path: f.path });
         filesChanged.push({

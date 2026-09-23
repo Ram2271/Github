@@ -147,7 +147,7 @@ class GitService {
     const baseMap = new Map(baseFiles.map(f => [f.path, f]));
     const headMap = new Map(headFiles.map(f => [f.path, f]));
 
-    const filebaseService = require('./filebaseService');
+    const storageService = require('./storageService');
     const changedFiles = [];
     let totalAdditions = 0;
     let totalDeletions = 0;
@@ -159,7 +159,7 @@ class GitService {
         // Newly added
         let content = '';
         try {
-          const res = await filebaseService.getFile(repoId, headBranchName, path);
+          const res = await storageService.getFile(repoId, headBranchName, path);
           content = res.buffer.toString('utf8');
         } catch (_) {}
         const { patch, additions, deletions } = this.computeDiff('', content, path);
@@ -177,9 +177,9 @@ class GitService {
         let oldContent = '';
         let newContent = '';
         try {
-          const resOld = await filebaseService.getFile(repoId, baseBranchName, path);
+          const resOld = await storageService.getFile(repoId, baseBranchName, path);
           oldContent = resOld.buffer.toString('utf8');
-          const resNew = await filebaseService.getFile(repoId, headBranchName, path);
+          const resNew = await storageService.getFile(repoId, headBranchName, path);
           newContent = resNew.buffer.toString('utf8');
         } catch (_) {}
         const { patch, additions, deletions } = this.computeDiff(oldContent, newContent, path);
@@ -200,7 +200,7 @@ class GitService {
       if (!headMap.has(path)) {
         let oldContent = '';
         try {
-          const res = await filebaseService.getFile(repoId, baseBranchName, path);
+          const res = await storageService.getFile(repoId, baseBranchName, path);
           oldContent = res.buffer.toString('utf8');
         } catch (_) {}
         const { patch, additions, deletions } = this.computeDiff(oldContent, '', path);

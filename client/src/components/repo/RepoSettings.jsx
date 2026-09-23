@@ -137,7 +137,7 @@ export default function RepoSettings({ repo, onRepoUpdated }) {
           <div>
             <h3 className="font-semibold text-gh-text">Delete this repository</h3>
             <p className="text-gh-muted text-xs mt-0.5">
-              Once deleted, all repository data, Filebase S3 files, commits, issues, and pull requests will be permanently erased.
+              Once deleted, all repository data, Google Drive files, commits, issues, and pull requests will be permanently erased.
             </p>
           </div>
         </div>

@@ -63,7 +63,7 @@ export const api = {
   toggleStar: (owner, repo) => request(`/repos/${owner}/${repo}/star`, { method: 'POST' }),
   forkRepo: (owner, repo) => request(`/repos/${owner}/${repo}/fork`, { method: 'POST' }),
 
-  // Files & Filebase S3
+  // Files & Google Drive Cloud Storage
   getTree: (owner, repo, branch, path = '') => request(`/files/${owner}/${repo}/tree/${branch}/${path}`),
   getBlob: (owner, repo, branch, path) => request(`/files/${owner}/${repo}/blob/${branch}/${path}`),
   uploadFiles: (owner, repo, formData) => request(`/files/${owner}/${repo}/upload`, { method: 'POST', body: formData }),

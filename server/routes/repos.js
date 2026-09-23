@@ -10,7 +10,7 @@ const Notification = require('../models/Notification');
 const Activity = require('../models/Activity');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const gitService = require('../services/gitService');
-const filebaseService = require('../services/filebaseService');
+const storageService = require('../services/storageService');
 
 const router = express.Router();
 
@@ -91,8 +91,8 @@ router.post('/', requireAuth, async (req, res) => {
       const readmeContent = `# ${repo.name}\n\n${repo.description || 'A new repository created on GitHub.'}\n\n## Getting Started\n\nWelcome to your new repository! You can add files, upload complete folders, write code, create branches, and preview your live web application using the built-in Runner.\n`;
       const readmePath = 'README.md';
 
-      // 1. Upload to Filebase S3
-      const uploadRef = await filebaseService.uploadFile(
+      // 1. Upload to Cloud Storage
+      const uploadRef = await storageService.uploadFile(
         String(repo._id),
         'main',
         readmePath,

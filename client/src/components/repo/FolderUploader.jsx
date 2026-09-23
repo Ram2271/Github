@@ -143,7 +143,7 @@ export default function FolderUploader({ repo, branch, onClose, onSuccess }) {
           <div>
             <h2 className="text-base font-semibold text-gh-text">Upload files &amp; complete folders</h2>
             <p className="text-gh-muted text-xs mt-0.5">
-              Files will be stored in Filebase S3 preserving their complete directory hierarchy.
+              Files will be stored in Google Drive cloud storage preserving their complete directory hierarchy.
             </p>
           </div>
           <button onClick={onClose} className="text-gh-muted hover:text-gh-text p-1">
@@ -292,7 +292,7 @@ export default function FolderUploader({ repo, branch, onClose, onSuccess }) {
                 {uploading ? (
                   <>
                     <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Uploading to Filebase...</span>
+                    <span>Uploading to Google Drive...</span>
                   </>
                 ) : (
                   <span>Commit changes</span>

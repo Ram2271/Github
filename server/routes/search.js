@@ -5,7 +5,7 @@ const FileNode = require('../models/FileNode');
 const Issue = require('../models/Issue');
 const PullRequest = require('../models/PullRequest');
 const { optionalAuth } = require('../middleware/auth');
-const filebaseService = require('../services/filebaseService');
+const storageService = require('../services/storageService');
 
 const router = express.Router();
 

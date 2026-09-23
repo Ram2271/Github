@@ -3,7 +3,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const FileNode = require('../models/FileNode');
 const Repository = require('../models/Repository');
-const filebaseStorage = require('../config/filebase');
+const storage = require('../config/googleDrive');
 
 // Map of running python processes: `${repoId}:${branch}` => { process, port, logs: [], status: 'running'|'stopped' }
 const pythonProcesses = new Map();
@@ -67,7 +67,7 @@ class RunnerService {
     const key = `${repoId}/${branch}/${normalizedPath}`;
 
     try {
-      const file = await filebaseStorage.getObject(key);
+      const file = await storage.getObject(key);
       let buffer = file.buffer;
       let contentType = file.contentType;
 
@@ -166,7 +166,7 @@ class RunnerService {
     for (const fileNode of files) {
       try {
         const key = `${repoId}/${branch}/${fileNode.path}`;
-        const obj = await filebaseStorage.getObject(key);
+        const obj = await storage.getObject(key);
         const filePath = path.join(tempDir, fileNode.path.split('/').join(path.sep));
         const fileDir = path.dirname(filePath);
         if (!fs.existsSync(fileDir)) {

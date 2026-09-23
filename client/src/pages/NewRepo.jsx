@@ -59,7 +59,7 @@ export default function NewRepo() {
       <div className="border-b border-gh-border pb-4">
         <h1 className="text-2xl font-bold text-white mb-1">Create a new repository</h1>
         <p className="text-gh-muted">
-          A repository contains all project files, revision history, and Filebase S3 references.
+          A repository contains all project files, revision history, and Google Drive cloud storage references.
         </p>
       </div>
 
@@ -175,7 +175,7 @@ export default function NewRepo() {
             disabled={creating || !name.trim()}
             className="px-5 py-2.5 bg-gh-green hover:bg-gh-greenHover disabled:opacity-50 text-white font-semibold rounded-md shadow-sm transition-colors text-xs flex items-center gap-2"
           >
-            {creating ? 'Creating repository on Filebase & MongoDB...' : 'Create repository'}
+            {creating ? 'Creating repository on Google Drive & MongoDB...' : 'Create repository'}
           </button>
         </div>
       </form>

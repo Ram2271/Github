@@ -8,7 +8,7 @@ const Notification = require('../models/Notification');
 const Activity = require('../models/Activity');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const gitService = require('../services/gitService');
-const filebaseService = require('../services/filebaseService');
+const storageService = require('../services/storageService');
 
 const router = express.Router();
 
@@ -206,13 +206,13 @@ router.post('/:owner/:repo/pulls/:number/merge', requireAuth, async (req, res) =
       if (change.status === 'deleted') {
         await FileNode.deleteOne({ repoId: String(repo._id), branch: pr.baseBranch, path: change.path });
         try {
-          await filebaseService.deleteFile(String(repo._id), pr.baseBranch, change.path);
+          await storageService.deleteFile(String(repo._id), pr.baseBranch, change.path);
         } catch (_) {}
       } else {
         const headNode = headFiles.find(f => f.path === change.path);
         if (headNode) {
-          // Copy object to base branch in Filebase S3
-          const uploadRef = await filebaseService.duplicateFileToBranch(
+          // Copy object to base branch in Cloud Storage
+          const uploadRef = await storageService.duplicateFileToBranch(
             String(repo._id),
             pr.headBranch,
             pr.baseBranch,
