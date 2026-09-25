@@ -4,8 +4,14 @@ import { ShieldCheck, Mail, ArrowLeft, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
-  const { login, verifyLogin, resendVerificationCode } = useAuth();
+  const { user, login, verifyLogin, resendVerificationCode } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user) {
+      navigate('/', { replace: true });
+    }
+  }, [user, navigate]);
 
   // Step state: 'credentials' | 'verification'
   const [step, setStep] = useState('credentials');

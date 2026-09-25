@@ -139,6 +139,7 @@ export default function RepoView() {
         activeTab={activeTab}
         isStarred={isStarred}
         isOwner={isOwner}
+        currentBranch={currentBranch}
       />
 
       {/* Tab Content Container */}

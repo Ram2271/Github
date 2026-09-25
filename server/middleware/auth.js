@@ -3,6 +3,21 @@ const User = require('../models/User');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'github_clone_super_secret_jwt_key_2026';
 
+async function findUserFromToken(decoded) {
+  if (!decoded) return null;
+  let user = null;
+  if (decoded.userId) {
+    user = await User.findById(decoded.userId);
+  }
+  if (!user && decoded.email) {
+    user = await User.findOne({ email: String(decoded.email).toLowerCase() });
+  }
+  if (!user && decoded.username) {
+    user = await User.findOne({ username: String(decoded.username).toLowerCase() });
+  }
+  return user;
+}
+
 async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -12,7 +27,7 @@ async function requireAuth(req, res, next) {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.userId);
+    const user = await findUserFromToken(decoded);
     if (!user) {
       return res.status(401).json({ error: 'User no longer exists.' });
     }
@@ -33,7 +48,7 @@ async function optionalAuth(req, res, next) {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.userId);
+    const user = await findUserFromToken(decoded);
     req.user = user || null;
   } catch (_) {
     req.user = null;
@@ -45,7 +60,7 @@ function generateToken(user) {
   return jwt.sign(
     { userId: user._id, username: user.username, email: user.email },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: '365d' }
   );
 }
 

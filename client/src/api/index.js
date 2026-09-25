@@ -31,7 +31,9 @@ async function request(endpoint, options = {}) {
 
   if (!res.ok) {
     const errorMsg = data && data.error ? data.error : (typeof data === 'string' ? data : 'Request failed');
-    throw new Error(errorMsg);
+    const error = new Error(errorMsg);
+    error.status = res.status;
+    throw error;
   }
 
   return data;
@@ -71,6 +73,34 @@ export const api = {
   editFile: (owner, repo, body) => request(`/files/${owner}/${repo}/edit`, { method: 'PUT', body }),
   renameFile: (owner, repo, body) => request(`/files/${owner}/${repo}/rename`, { method: 'POST', body }),
   deleteFile: (owner, repo, body) => request(`/files/${owner}/${repo}/delete`, { method: 'DELETE', body }),
+  downloadRepoZip: async (owner, repo, branch = 'main') => {
+    const token = localStorage.getItem('gh_token');
+    const headers = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(`${API_BASE}/files/${owner}/${repo}/download/${encodeURIComponent(branch)}`, {
+      method: 'GET',
+      headers
+    });
+    if (!res.ok) {
+      let msg = 'Failed to download repository ZIP';
+      try {
+        const errData = await res.json();
+        if (errData && errData.error) msg = errData.error;
+      } catch (_) {}
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${repo}-${branch}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 
   // Branches
   listBranches: (owner, repo) => request(`/repos/${owner}/${repo}/branches`),

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { GitBranch, Folder, FileText, Plus, Upload, Check, ChevronDown, Clock, Search, FileEdit, Trash2 } from 'lucide-react';
+import { GitBranch, Folder, FileText, Plus, Upload, Check, ChevronDown, Clock, Search, FileEdit, Trash2, Download } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api';
@@ -26,6 +26,19 @@ export default function FileBrowser({
   const [branchFilter, setBranchFilter] = useState('');
   const [newBranchName, setNewBranchName] = useState('');
   const [creatingBranch, setCreatingBranch] = useState(false);
+  const [downloadingZip, setDownloadingZip] = useState(false);
+
+  const handleDownloadZip = async () => {
+    if (downloadingZip) return;
+    setDownloadingZip(true);
+    try {
+      await api.downloadRepoZip(repo.ownerUsername, repo.name, branch);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setDownloadingZip(false);
+    }
+  };
 
   // Rename modal state
   const [renameTarget, setRenameTarget] = useState(null); // { path, name, type }
@@ -247,9 +260,9 @@ export default function FileBrowser({
           </div>
         </div>
 
-        {/* Right Buttons: Add file / Upload */}
-        {isOwner && (
-          <div className="flex items-center gap-2" ref={addFileRef}>
+        {/* Right Buttons: Download Source Code (.ZIP) + Add file / Upload */}
+        <div className="flex items-center gap-2" ref={addFileRef}>
+          {isOwner && (
             <div className="relative">
               <button
                 onClick={() => setAddFileDropdown(!addFileDropdown)}
@@ -283,8 +296,18 @@ export default function FileBrowser({
                 </div>
               )}
             </div>
-          </div>
-        )}
+          )}
+
+          <button
+            onClick={handleDownloadZip}
+            disabled={downloadingZip}
+            title={`Download all source code (${repo.name}-${branch}.zip)`}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gh-green hover:bg-gh-greenHover disabled:opacity-60 text-white rounded-md text-xs font-semibold shadow-sm transition-colors"
+          >
+            <Download className={`w-3.5 h-3.5 ${downloadingZip ? 'animate-bounce' : ''}`} />
+            <span>{downloadingZip ? 'Preparing ZIP...' : 'Download Source Code (.ZIP)'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Latest Commit Bar */}

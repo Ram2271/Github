@@ -11,6 +11,7 @@ const storageService = require('../services/storageService');
 const gitService = require('../services/gitService');
 const googleDriveStorage = require('../config/googleDrive');
 const runnerService = require('../services/runnerService');
+const { createZipBuffer } = require('../utils/zipBuilder');
 
 const router = express.Router();
 const upload = multer({
@@ -179,6 +180,61 @@ router.get('/:owner/:repo/raw/:branch/*', optionalAuth, async (req, res) => {
     res.send(fileObj.buffer);
   } catch (err) {
     res.status(404).send('File not found');
+  }
+});
+
+// GET /api/files/:owner/:repo/download/:branch - Download all repository source code as a single .zip file
+router.get('/:owner/:repo/download/:branch', optionalAuth, async (req, res) => {
+  try {
+    const repo = await getRepo(req.params.owner, req.params.repo, req.user);
+    if (!repo) return res.status(404).json({ error: 'Repository not found' });
+
+    const branchName = req.params.branch || repo.defaultBranch || 'main';
+    const allFiles = await FileNode.find({ repoId: String(repo._id), branch: branchName });
+    const rootFolder = `${repo.name}-${branchName}`;
+    const zipEntries = [];
+
+    if (!allFiles || allFiles.length === 0) {
+      zipEntries.push({
+        path: `${rootFolder}/README.md`,
+        buffer: Buffer.from(`# ${repo.name}\n\n${repo.description || 'Repository source archive.'}\n`, 'utf8'),
+        date: new Date()
+      });
+    } else {
+      // Download file contents in parallel batches of 6
+      const batchSize = 6;
+      for (let i = 0; i < allFiles.length; i += batchSize) {
+        const batch = allFiles.slice(i, i + batchSize);
+        const results = await Promise.all(
+          batch.map(async (fileNode) => {
+            try {
+              const fileObj = await storageService.getFile(String(repo._id), branchName, fileNode.path);
+              return {
+                path: `${rootFolder}/${fileNode.path.replace(/^\/+/, '')}`,
+                buffer: fileObj.buffer,
+                date: fileNode.lastCommitDate || fileNode.updatedAt || new Date()
+              };
+            } catch (e) {
+              return null;
+            }
+          })
+        );
+        for (const item of results) {
+          if (item) zipEntries.push(item);
+        }
+      }
+    }
+
+    const zipBuffer = createZipBuffer(zipEntries);
+    const filename = `${repo.name}-${branchName}.zip`;
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', zipBuffer.length);
+    res.send(zipBuffer);
+  } catch (err) {
+    console.error('Download ZIP error:', err);
+    res.status(500).json({ error: 'Failed to generate source code ZIP archive' });
   }
 });
 

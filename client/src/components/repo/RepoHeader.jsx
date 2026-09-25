@@ -1,16 +1,29 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Code, CircleDot, GitPullRequest, GitCommit, Settings, Play, Star, GitFork, Eye, Lock, Globe } from 'lucide-react';
+import { Code, CircleDot, GitPullRequest, GitCommit, Settings, Play, Star, GitFork, Eye, Lock, Globe, Download } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api';
 
-export default function RepoHeader({ repo, counts, activeTab, isStarred: initialStarred, isOwner }) {
+export default function RepoHeader({ repo, counts, activeTab, isStarred: initialStarred, isOwner, currentBranch }) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
   const [isStarred, setIsStarred] = useState(initialStarred);
   const [starsCount, setStarsCount] = useState(counts?.stars || 0);
   const [forking, setForking] = useState(false);
+  const [downloadingZip, setDownloadingZip] = useState(false);
+
+  const handleDownloadZip = async () => {
+    if (downloadingZip) return;
+    setDownloadingZip(true);
+    try {
+      await api.downloadRepoZip(repo.ownerUsername, repo.name, currentBranch || repo.defaultBranch || 'main');
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setDownloadingZip(false);
+    }
+  };
 
   const handleStar = async () => {
     if (!user) {
@@ -88,7 +101,18 @@ export default function RepoHeader({ repo, counts, activeTab, isStarred: initial
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center flex-wrap gap-2">
+            {/* Download All Code Button */}
+            <button
+              onClick={handleDownloadZip}
+              disabled={downloadingZip}
+              title={`Download all source code (${repo.name}-${currentBranch || repo.defaultBranch || 'main'}.zip)`}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gh-green hover:bg-gh-greenHover disabled:opacity-60 text-white rounded-md text-xs font-semibold shadow-sm transition-colors"
+            >
+              <Download className={`w-3.5 h-3.5 ${downloadingZip ? 'animate-bounce' : ''}`} />
+              <span>{downloadingZip ? 'Downloading...' : 'Download Code'}</span>
+            </button>
+
             {/* Star Button */}
             <button
               onClick={handleStar}
