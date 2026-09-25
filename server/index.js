@@ -3,7 +3,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { connectDB } = require('./config/db');
+const { connectDB, isConnected } = require('./config/db');
 const { seedDatabase } = require('./utils/seed');
 
 const authRoutes = require('./routes/auth');
@@ -29,6 +29,16 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Ensure MongoDB Atlas is connected BEFORE processing any route (critical for Vercel Serverless)
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+  } catch (err) {
+    console.error('[DB Middleware Error]', err.message);
+  }
+  next();
+});
+
 // Live Web Project Runner Route: /runner/:owner/:repo/:branch/*
 const runnerProxyRouter = express.Router({ mergeParams: true });
 runnerProxyRouter.use('/:owner/:repo/:branch', serveWebProject);
@@ -51,6 +61,7 @@ app.use('/api/runner', runnerApiRouter);
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'online',
+    mongoConnected: isConnected(),
     version: '1.0.0',
     time: new Date().toISOString()
   });
@@ -81,19 +92,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Ensure Database is connected before processing requests (essential for Serverless / Vercel)
-let dbInitPromise = null;
-app.use(async (req, res, next) => {
-  if (!dbInitPromise) {
-    dbInitPromise = connectDB().catch(err => {
-      console.error('[DB Middleware Error]', err.message);
-      dbInitPromise = null;
-    });
-  }
-  await dbInitPromise;
-  next();
-});
-
 // Start Server for local and persistent environments
 async function startServer() {
   await connectDB();
@@ -114,4 +112,3 @@ if (require.main === module && !process.env.VERCEL) {
 
 module.exports = app;
 module.exports.connectDB = connectDB;
-
