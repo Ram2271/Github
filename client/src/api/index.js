@@ -101,6 +101,7 @@ export const api = {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
+  buildRepoApk: (owner, repo, formData) => request(`/files/${owner}/${repo}/build-apk`, { method: 'POST', body: formData }),
 
   // Branches
   listBranches: (owner, repo) => request(`/repos/${owner}/${repo}/branches`),

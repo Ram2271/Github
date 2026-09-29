@@ -12,6 +12,7 @@ const gitService = require('../services/gitService');
 const googleDriveStorage = require('../config/googleDrive');
 const runnerService = require('../services/runnerService');
 const { createZipBuffer } = require('../utils/zipBuilder');
+const { buildSignedApk } = require('../services/apkBuilderService');
 
 const router = express.Router();
 const upload = multer({
@@ -110,12 +111,21 @@ router.get(['/:owner/:repo/tree/:branch', '/:owner/:repo/tree/:branch/*'], optio
     // Get latest commit on this branch
     const latestCommit = await Commit.findOne({ repoId: String(repo._id), branch: branchName });
 
+    // Detect index.html in current subpath or anywhere in repository on this branch
+    const subpathIndex = allFiles.find(f => {
+      const targetPath = requestedSubpath ? `${requestedSubpath}/index.html` : 'index.html';
+      return f.path.toLowerCase() === targetPath.toLowerCase();
+    });
+    const anyIndex = subpathIndex || allFiles.find(f => f.path.toLowerCase() === 'index.html' || f.path.toLowerCase().endsWith('/index.html'));
+
     res.json({
       path: requestedSubpath,
       branch: branchName,
       items,
       readme: readmeContent ? { path: readmeFile.path, content: readmeContent } : null,
-      latestCommit: latestCommit || null
+      latestCommit: latestCommit || null,
+      hasIndexHtml: Boolean(anyIndex),
+      indexHtmlPath: anyIndex ? anyIndex.path : null
     });
   } catch (err) {
     console.error('Tree error:', err);
@@ -235,6 +245,197 @@ router.get('/:owner/:repo/download/:branch', optionalAuth, async (req, res) => {
   } catch (err) {
     console.error('Download ZIP error:', err);
     res.status(500).json({ error: 'Failed to generate source code ZIP archive' });
+  }
+});
+
+// POST /api/files/:owner/:repo/build-apk - Convert repository index.html + web assets into a signed Android APK and auto-commit to repo
+router.post('/:owner/:repo/build-apk', optionalAuth, upload.single('icon'), async (req, res) => {
+  try {
+    const repo = await getRepo(req.params.owner, req.params.repo, req.user);
+    if (!repo) return res.status(404).json({ error: 'Repository not found' });
+
+    const branch = req.body.branch || repo.defaultBranch || 'main';
+    const subpath = String(req.body.subpath || '').replace(/^\/+/, '').replace(/\/+$/, '');
+    const defaultPkg = `com.${repo.ownerUsername.replace(/[^a-z0-9]/gi, '').toLowerCase() || 'dev'}.${repo.name.replace(/[^a-z0-9]/gi, '').toLowerCase() || 'app'}`;
+
+    const appName = String(req.body.appName || repo.name).trim() || repo.name;
+    const packageId = String(req.body.packageId || defaultPkg).trim().toLowerCase();
+    const version = String(req.body.version || '1.0.0').trim() || '1.0.0';
+    const orientation = String(req.body.orientation || 'sensor').trim().toLowerCase();
+    const fullscreen = req.body.fullscreen !== 'false' && req.body.fullscreen !== false;
+
+    // Fetch all files in the repository on this branch
+    const allFiles = await FileNode.find({ repoId: String(repo._id), branch });
+    if (!allFiles || allFiles.length === 0) {
+      return res.status(400).json({ error: 'Repository is empty. Please add an index.html file first.' });
+    }
+
+    // Locate index.html (prefer current subpath if specified, else root index.html, else any nested index.html)
+    let indexNode = null;
+    if (subpath) {
+      indexNode = allFiles.find(f => f.path.toLowerCase() === `${subpath}/index.html`.toLowerCase());
+    }
+    if (!indexNode) {
+      indexNode = allFiles.find(f => f.path.toLowerCase() === 'index.html');
+    }
+    if (!indexNode) {
+      indexNode = allFiles.find(f => f.path.toLowerCase().endsWith('/index.html'));
+    }
+    if (!indexNode) {
+      return res.status(400).json({ error: 'No index.html found in this repository. An index.html file is required to build an Android APK.' });
+    }
+
+    // Determine base prefix to strip so index.html sits at root of assets/
+    const basePrefix = indexNode.path.toLowerCase() === 'index.html'
+      ? ''
+      : indexNode.path.slice(0, indexNode.path.length - 'index.html'.length);
+
+    const candidateNodes = allFiles.filter(f => {
+      if (f.path.toLowerCase().endsWith('.apk')) return false;
+      if (basePrefix) return f.path.startsWith(basePrefix);
+      return true;
+    });
+
+    const webFiles = [];
+    let detectedIconBuffer = req.file ? req.file.buffer : null;
+
+    // Download web files in parallel batches of 6
+    const batchSize = 6;
+    for (let i = 0; i < candidateNodes.length; i += batchSize) {
+      const batch = candidateNodes.slice(i, i + batchSize);
+      const loaded = await Promise.all(
+        batch.map(async (node) => {
+          try {
+            const fileObj = await storageService.getFile(String(repo._id), branch, node.path);
+            const relAssetPath = basePrefix && node.path.startsWith(basePrefix)
+              ? node.path.slice(basePrefix.length)
+              : node.path;
+            return { path: relAssetPath, buffer: fileObj.buffer };
+          } catch (_) {
+            return null;
+          }
+        })
+      );
+      for (const item of loaded) {
+        if (!item) continue;
+        webFiles.push(item);
+        if (!detectedIconBuffer && /^(icon|logo|favicon|apple-touch-icon)\.png$/i.test(path.basename(item.path))) {
+          detectedIconBuffer = item.buffer;
+        }
+      }
+    }
+
+    // Build and sign the Android APK in pure Node.js
+    const apkBuffer = buildSignedApk({
+      appName,
+      packageId,
+      version,
+      orientation,
+      fullscreen,
+      startUrl: 'file:///android_asset/index.html',
+      iconBuffer: detectedIconBuffer,
+      webFiles
+    });
+
+    const safeRepoSlug = (req.body.apkFileName || repo.name).replace(/[^a-zA-Z0-9._-]/g, '-').replace(/\.apk$/i, '');
+    const apkFileName = `${safeRepoSlug}.apk`;
+    const isOwner = Boolean(req.user && req.user.username === repo.ownerUsername);
+    let commit = null;
+
+    // Automatically add and commit the generated APK into the repository if requested by owner (or if repo owner exists)
+    const commitAuthor = req.user || {
+      username: repo.ownerUsername,
+      name: repo.ownerUsername,
+      email: `${repo.ownerUsername}@users.noreply.github.com`
+    };
+
+    const apkMimeType = 'application/vnd.android.package-archive';
+    const storageRef = await storageService.uploadFile(
+      String(repo._id),
+      branch,
+      apkFileName,
+      apkBuffer,
+      apkMimeType
+    );
+
+    const timestamp = new Date();
+    const commitMessage = `Build Android APK: ${apkFileName} (v${version})`;
+    const existingApk = await FileNode.findOne({
+      repoId: String(repo._id),
+      branch,
+      path: apkFileName
+    });
+
+    if (existingApk) {
+      await FileNode.updateOne(
+        { _id: existingApk._id },
+        {
+          $set: {
+            size: apkBuffer.length,
+            mimeType: apkMimeType,
+            storage: storageRef,
+            lastCommitMessage: commitMessage,
+            lastCommitAuthor: commitAuthor.username,
+            lastCommitDate: timestamp,
+            updatedAt: timestamp
+          }
+        }
+      );
+    } else {
+      await FileNode.create({
+        repoId: String(repo._id),
+        branch,
+        path: apkFileName,
+        name: apkFileName,
+        type: 'file',
+        size: apkBuffer.length,
+        mimeType: apkMimeType,
+        storage: storageRef,
+        lastCommitMessage: commitMessage,
+        lastCommitAuthor: commitAuthor.username,
+        lastCommitDate: timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      });
+    }
+
+    commit = await gitService.recordCommit({
+      repoId: String(repo._id),
+      branchName: branch,
+      message: commitMessage,
+      description: `Automatically built and signed Android APK (${packageId} v${version}) from ${indexNode.path}`,
+      author: commitAuthor,
+      filesChanged: [
+        {
+          path: apkFileName,
+          status: existingApk ? 'modified' : 'added',
+          additions: 1,
+          deletions: 0
+        }
+      ]
+    });
+
+    await FileNode.updateOne(
+      { repoId: String(repo._id), branch, path: apkFileName },
+      { $set: { lastCommitSha: commit.sha } }
+    );
+
+    res.json({
+      success: true,
+      committedToRepo: true,
+      apkFileName,
+      apkSize: apkBuffer.length,
+      appName,
+      packageId,
+      version,
+      indexHtmlPath: indexNode.path,
+      commit,
+      downloadUrl: `/api/files/${repo.ownerUsername}/${repo.name}/raw/${branch}/${apkFileName}`,
+      apkBase64: apkBuffer.toString('base64')
+    });
+  } catch (err) {
+    console.error('Build APK error:', err);
+    res.status(500).json({ error: err.message || 'Failed to build Android APK' });
   }
 });
 

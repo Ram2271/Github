@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { GitBranch, Folder, FileText, Plus, Upload, Check, ChevronDown, Clock, Search, FileEdit, Trash2, Download } from 'lucide-react';
+import { GitBranch, Folder, FileText, Plus, Upload, Check, ChevronDown, Clock, Search, FileEdit, Trash2, Download, Smartphone } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api';
 import MarkdownViewer from './MarkdownViewer';
+import ApkBuilderModal from './ApkBuilderModal';
 
 export default function FileBrowser({
   repo,
@@ -27,6 +28,12 @@ export default function FileBrowser({
   const [newBranchName, setNewBranchName] = useState('');
   const [creatingBranch, setCreatingBranch] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
+  const [apkModalOpen, setApkModalOpen] = useState(false);
+
+  const hasIndexHtml = Boolean(
+    treeData?.hasIndexHtml ||
+    (treeData?.items || []).some(i => i.name?.toLowerCase() === 'index.html')
+  );
 
   const handleDownloadZip = async () => {
     if (downloadingZip) return;
@@ -298,6 +305,17 @@ export default function FileBrowser({
             </div>
           )}
 
+          {hasIndexHtml && (
+            <button
+              onClick={() => setApkModalOpen(true)}
+              title="Convert index.html and web assets into a signed Android APK and commit to repo"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-xs font-semibold shadow-sm transition-colors"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Build APK</span>
+            </button>
+          )}
+
           <button
             onClick={handleDownloadZip}
             disabled={downloadingZip}
@@ -309,6 +327,32 @@ export default function FileBrowser({
           </button>
         </div>
       </div>
+
+      {/* Auto-Detected index.html -> Android APK Builder Banner */}
+      {hasIndexHtml && (
+        <div className="bg-emerald-950/25 border border-emerald-700/40 rounded-md px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+              <Smartphone className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="font-semibold text-white">Web App Detected (</span>
+              <code className="text-emerald-400 font-mono">{treeData?.indexHtmlPath || 'index.html'}</code>
+              <span className="font-semibold text-white">)</span>
+              <span className="text-gh-muted ml-1.5">
+                — Convert this repository into a signed Android <code className="text-gh-text font-mono">.apk</code> and automatically add it to your repo.
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setApkModalOpen(true)}
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md font-semibold whitespace-nowrap transition-colors shadow-sm"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Build Android APK</span>
+          </button>
+        </div>
+      )}
 
       {/* Latest Commit Bar */}
       {treeData?.latestCommit && (
@@ -363,6 +407,8 @@ export default function FileBrowser({
                 <div className="flex items-center gap-3 min-w-[200px] flex-1">
                   {isDir ? (
                     <Folder className="w-4 h-4 text-sky-400 fill-sky-400/20 flex-shrink-0" />
+                  ) : item.name?.toLowerCase().endsWith('.apk') ? (
+                    <Smartphone className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                   ) : (
                     <FileText className="w-4 h-4 text-gh-muted flex-shrink-0" />
                   )}
@@ -372,6 +418,16 @@ export default function FileBrowser({
                   >
                     {item.name}
                   </Link>
+                  {item.name?.toLowerCase().endsWith('.apk') && (
+                    <a
+                      href={`/api/files/${repo.ownerUsername}/${repo.name}/raw/${branch}/${item.path}`}
+                      download={item.name}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 rounded text-[10px] font-semibold transition-colors"
+                    >
+                      <Download className="w-3 h-3" />
+                      <span>Download APK</span>
+                    </a>
+                  )}
                 </div>
 
                 <div className="hidden sm:block text-gh-muted text-xs truncate flex-1 max-w-md">
@@ -543,6 +599,19 @@ export default function FileBrowser({
             </form>
           </div>
         </div>
+      )}
+      {/* APK Builder Modal */}
+      {apkModalOpen && (
+        <ApkBuilderModal
+          repo={repo}
+          branch={branch}
+          subpath={subpath}
+          indexHtmlPath={treeData?.indexHtmlPath || 'index.html'}
+          onClose={() => setApkModalOpen(false)}
+          onSuccess={() => {
+            if (onRefresh) onRefresh();
+          }}
+        />
       )}
     </div>
   );
