@@ -45,16 +45,7 @@ function getDriveClient() {
   try {
     const { google } = require('googleapis');
 
-    if (isOAuthConfigured) {
-      const oauth2Client = new google.auth.OAuth2(
-        GOOGLE_CLIENT_ID,
-        GOOGLE_CLIENT_SECRET,
-        'http://localhost:3000/oauth2callback'
-      );
-      oauth2Client.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
-      driveClient = google.drive({ version: 'v3', auth: oauth2Client });
-      console.log('[Storage] ✅ Google Drive client initialized (OAuth2 - Personal 15GB Quota)');
-    } else if (isServiceAccountConfigured) {
+    if (isServiceAccountConfigured) {
       // Format private key properly, handling escaped \n in .env files
       const privateKey = GOOGLE_PRIVATE_KEY.includes('\\n')
         ? GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
@@ -68,6 +59,15 @@ function getDriveClient() {
 
       driveClient = google.drive({ version: 'v3', auth: authClient });
       console.log('[Storage] ✅ Google Drive client initialized (Service Account:', GOOGLE_SERVICE_ACCOUNT_EMAIL + ')');
+    } else if (isOAuthConfigured) {
+      const oauth2Client = new google.auth.OAuth2(
+        GOOGLE_CLIENT_ID,
+        GOOGLE_CLIENT_SECRET,
+        'http://localhost:3000/oauth2callback'
+      );
+      oauth2Client.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
+      driveClient = google.drive({ version: 'v3', auth: oauth2Client });
+      console.log('[Storage] ✅ Google Drive client initialized (OAuth2)');
     }
 
     return driveClient;
@@ -243,32 +243,51 @@ const googleDriveStorage = {
   /**
    * Retrieve an object buffer from Google Drive (or local fallback)
    */
-  async getObject(key) {
+  async getObject(key, fileId = null) {
     const drive = getDriveClient();
 
     if (isConfigured && drive) {
-      const fileInfo = await findDriveFileByKey(drive, key);
-      if (!fileInfo) {
-        throw new Error(`Google Drive file not found: ${key}`);
+      // 1. Direct fetch by fileId if provided
+      if (fileId) {
+        try {
+          const res = await drive.files.get(
+            { fileId, alt: 'media', supportsAllDrives: true },
+            { responseType: 'stream' }
+          );
+          const buffer = await streamToBuffer(res.data);
+          return {
+            buffer,
+            contentType: mime.lookup(key) || 'application/octet-stream',
+            contentLength: buffer.length
+          };
+        } catch (fileIdErr) {
+          console.warn(`[Storage] Failed to retrieve by fileId (${fileId}): ${fileIdErr.message}, falling back to key query...`);
+        }
       }
 
-      const res = await drive.files.get(
-        { fileId: fileInfo.id, alt: 'media' },
-        { responseType: 'stream' }
-      );
+      // 2. Query Google Drive by key
+      const fileInfo = await findDriveFileByKey(drive, key);
+      if (fileInfo) {
+        const res = await drive.files.get(
+          { fileId: fileInfo.id, alt: 'media', supportsAllDrives: true },
+          { responseType: 'stream' }
+        );
 
-      const buffer = await streamToBuffer(res.data);
-      return {
-        buffer,
-        contentType: fileInfo.mimeType || mime.lookup(key) || 'application/octet-stream',
-        contentLength: buffer.length
-      };
+        const buffer = await streamToBuffer(res.data);
+        return {
+          buffer,
+          contentType: fileInfo.mimeType || mime.lookup(key) || 'application/octet-stream',
+          contentLength: buffer.length
+        };
+      }
+
+      console.warn(`[Storage] Google Drive file not found by key: ${key}`);
     }
 
     // Local Storage Emulator
     const targetPath = path.join(LOCAL_STORAGE_DIR, key.split('/').join(path.sep));
     if (!fs.existsSync(targetPath)) {
-      throw new Error(`Object not found in local storage emulator: ${key}`);
+      throw new Error(`File not found in storage: ${key}`);
     }
     const buffer = fs.readFileSync(targetPath);
     const contentType = mime.lookup(key) || 'application/octet-stream';

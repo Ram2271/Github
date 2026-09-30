@@ -21,9 +21,9 @@ class StorageService {
   /**
    * Retrieves file content buffer from Google Drive
    */
-  async getFile(repoId, branch, relativePath) {
+  async getFile(repoId, branch, relativePath, fileId = null) {
     const key = this.buildKey(repoId, branch, relativePath);
-    return await googleDriveStorage.getObject(key);
+    return await googleDriveStorage.getObject(key, fileId);
   }
 
   /**

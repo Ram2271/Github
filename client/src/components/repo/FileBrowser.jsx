@@ -305,7 +305,7 @@ export default function FileBrowser({
             </div>
           )}
 
-          {hasIndexHtml && (
+          {isOwner && hasIndexHtml && (
             <button
               onClick={() => setApkModalOpen(true)}
               title="Convert index.html and web assets into a signed Android APK and commit to repo"
@@ -328,8 +328,8 @@ export default function FileBrowser({
         </div>
       </div>
 
-      {/* Auto-Detected index.html -> Android APK Builder Banner */}
-      {hasIndexHtml && (
+      {/* Auto-Detected index.html -> Android APK Builder Banner (Owner Only) */}
+      {isOwner && hasIndexHtml && (
         <div className="bg-emerald-950/25 border border-emerald-700/40 rounded-md px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2.5">
             <div className="p-1.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">

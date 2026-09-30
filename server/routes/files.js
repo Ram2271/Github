@@ -103,7 +103,7 @@ router.get(['/:owner/:repo/tree/:branch', '/:owner/:repo/tree/:branch/*'], optio
     let readmeContent = null;
     if (readmeFile) {
       try {
-        const fileObj = await storageService.getFile(String(repo._id), branchName, readmeFile.path);
+        const fileObj = await storageService.getFile(String(repo._id), branchName, readmeFile.path, readmeFile.storage?.fileId);
         readmeContent = fileObj.buffer.toString('utf8');
       } catch (_) {}
     }
@@ -152,8 +152,8 @@ router.get('/:owner/:repo/blob/:branch/*', optionalAuth, async (req, res) => {
       return res.status(404).json({ error: 'File not found' });
     }
 
-    // Retrieve file buffer from Filebase
-    const fileObj = await storageService.getFile(String(repo._id), branchName, filePath);
+    // Retrieve file buffer directly from Google Drive using stored fileId
+    const fileObj = await storageService.getFile(String(repo._id), branchName, filePath, fileNode.storage?.fileId);
     const isBinary = fileObj.contentType.startsWith('image/') ||
       fileObj.contentType.startsWith('audio/') ||
       fileObj.contentType.startsWith('video/') ||
@@ -171,7 +171,8 @@ router.get('/:owner/:repo/blob/:branch/*', optionalAuth, async (req, res) => {
       size: fileObj.contentLength
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to retrieve file content' });
+    console.error('Blob error for path:', req.params[0], err.message);
+    res.status(500).json({ error: 'Failed to retrieve file content: ' + (err.message || 'Error reading from storage') });
   }
 });
 
@@ -184,12 +185,18 @@ router.get('/:owner/:repo/raw/:branch/*', optionalAuth, async (req, res) => {
     const branchName = req.params.branch;
     const filePath = (req.params[0] || '').replace(/^\/+/, '');
 
-    const fileObj = await storageService.getFile(String(repo._id), branchName, filePath);
+    const fileNode = await FileNode.findOne({
+      repoId: String(repo._id),
+      branch: branchName,
+      path: filePath
+    });
+
+    const fileObj = await storageService.getFile(String(repo._id), branchName, filePath, fileNode?.storage?.fileId);
     res.setHeader('Content-Type', fileObj.contentType);
     res.setHeader('Content-Length', fileObj.contentLength);
     res.send(fileObj.buffer);
   } catch (err) {
-    res.status(404).send('File not found');
+    res.status(404).send('File not found: ' + err.message);
   }
 });
 
@@ -218,7 +225,7 @@ router.get('/:owner/:repo/download/:branch', optionalAuth, async (req, res) => {
         const results = await Promise.all(
           batch.map(async (fileNode) => {
             try {
-              const fileObj = await storageService.getFile(String(repo._id), branchName, fileNode.path);
+              const fileObj = await storageService.getFile(String(repo._id), branchName, fileNode.path, fileNode.storage?.fileId);
               return {
                 path: `${rootFolder}/${fileNode.path.replace(/^\/+/, '')}`,
                 buffer: fileObj.buffer,
@@ -249,10 +256,15 @@ router.get('/:owner/:repo/download/:branch', optionalAuth, async (req, res) => {
 });
 
 // POST /api/files/:owner/:repo/build-apk - Convert repository index.html + web assets into a signed Android APK and auto-commit to repo
-router.post('/:owner/:repo/build-apk', optionalAuth, upload.single('icon'), async (req, res) => {
+router.post('/:owner/:repo/build-apk', requireAuth, upload.single('icon'), async (req, res) => {
   try {
     const repo = await getRepo(req.params.owner, req.params.repo, req.user);
     if (!repo) return res.status(404).json({ error: 'Repository not found' });
+
+    // Strict owner verification: only the creator of the repository can build APKs
+    if (repo.ownerUsername !== req.user.username) {
+      return res.status(403).json({ error: 'Permission denied. Only the repository creator can build APKs for this repository.' });
+    }
 
     const branch = req.body.branch || repo.defaultBranch || 'main';
     const subpath = String(req.body.subpath || '').replace(/^\/+/, '').replace(/\/+$/, '');
@@ -299,14 +311,14 @@ router.post('/:owner/:repo/build-apk', optionalAuth, upload.single('icon'), asyn
     const webFiles = [];
     let detectedIconBuffer = req.file ? req.file.buffer : null;
 
-    // Download web files in parallel batches of 6
+    // Download web files in parallel batches of 6 using direct Google Drive fileId
     const batchSize = 6;
     for (let i = 0; i < candidateNodes.length; i += batchSize) {
       const batch = candidateNodes.slice(i, i + batchSize);
       const loaded = await Promise.all(
         batch.map(async (node) => {
           try {
-            const fileObj = await storageService.getFile(String(repo._id), branch, node.path);
+            const fileObj = await storageService.getFile(String(repo._id), branch, node.path, node.storage?.fileId);
             const relAssetPath = basePrefix && node.path.startsWith(basePrefix)
               ? node.path.slice(basePrefix.length)
               : node.path;
