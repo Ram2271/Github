@@ -103,8 +103,12 @@ router.get(['/:owner/:repo/tree/:branch', '/:owner/:repo/tree/:branch/*'], optio
     let readmeContent = null;
     if (readmeFile) {
       try {
-        const fileObj = await storageService.getFile(String(repo._id), branchName, readmeFile.path, readmeFile.storage?.fileId);
-        readmeContent = fileObj.buffer.toString('utf8');
+        if (readmeFile.contentBase64) {
+          readmeContent = Buffer.from(readmeFile.contentBase64, 'base64').toString('utf8');
+        } else {
+          const fileObj = await storageService.getFile(String(repo._id), branchName, readmeFile.path, readmeFile.storage?.fileId);
+          readmeContent = fileObj.buffer.toString('utf8');
+        }
       } catch (_) {}
     }
 
@@ -152,23 +156,46 @@ router.get('/:owner/:repo/blob/:branch/*', optionalAuth, async (req, res) => {
       return res.status(404).json({ error: 'File not found' });
     }
 
-    // Retrieve file buffer directly from Google Drive using stored fileId
-    const fileObj = await storageService.getFile(String(repo._id), branchName, filePath, fileNode.storage?.fileId);
-    const isBinary = fileObj.contentType.startsWith('image/') ||
-      fileObj.contentType.startsWith('audio/') ||
-      fileObj.contentType.startsWith('video/') ||
-      fileObj.contentType.includes('pdf') ||
-      fileObj.contentType.includes('zip') ||
-      fileObj.contentType.includes('octet-stream');
+    // 1. Retrieve file buffer directly from database contentBase64 if present, else fallback to Google Drive
+    let fileBuffer = null;
+    let fileContentType = fileNode.mimeType || mime.lookup(filePath) || 'application/octet-stream';
 
-    const content = isBinary ? null : fileObj.buffer.toString('utf8');
+    if (fileNode.contentBase64) {
+      try {
+        fileBuffer = Buffer.from(fileNode.contentBase64, 'base64');
+      } catch (_) {}
+    }
+
+    if (!fileBuffer) {
+      const fileObj = await storageService.getFile(String(repo._id), branchName, filePath, fileNode.storage?.fileId);
+      fileBuffer = fileObj.buffer;
+      fileContentType = fileObj.contentType || fileContentType;
+
+      // Opportunistically cache into FileNode in MongoDB Atlas if file is under 10MB
+      if (fileBuffer && fileBuffer.length <= 10 * 1024 * 1024) {
+        FileNode.updateOne(
+          { _id: fileNode._id },
+          { $set: { contentBase64: fileBuffer.toString('base64') } }
+        ).catch(() => {});
+      }
+    }
+
+    const isBinary = fileContentType.startsWith('image/') ||
+      fileContentType.startsWith('audio/') ||
+      fileContentType.startsWith('video/') ||
+      fileContentType.includes('pdf') ||
+      fileContentType.includes('zip') ||
+      fileContentType.includes('octet-stream') ||
+      fileContentType.includes('vnd.android.package-archive');
+
+    const content = isBinary ? null : fileBuffer.toString('utf8');
 
     res.json({
       file: fileNode,
       content,
       isBinary,
-      contentType: fileObj.contentType,
-      size: fileObj.contentLength
+      contentType: fileContentType,
+      size: fileBuffer.length
     });
   } catch (err) {
     console.error('Blob error for path:', req.params[0], err.message);
@@ -191,10 +218,24 @@ router.get('/:owner/:repo/raw/:branch/*', optionalAuth, async (req, res) => {
       path: filePath
     });
 
-    const fileObj = await storageService.getFile(String(repo._id), branchName, filePath, fileNode?.storage?.fileId);
-    res.setHeader('Content-Type', fileObj.contentType);
-    res.setHeader('Content-Length', fileObj.contentLength);
-    res.send(fileObj.buffer);
+    let fileBuffer = null;
+    let fileContentType = fileNode?.mimeType || mime.lookup(filePath) || 'application/octet-stream';
+
+    if (fileNode?.contentBase64) {
+      try {
+        fileBuffer = Buffer.from(fileNode.contentBase64, 'base64');
+      } catch (_) {}
+    }
+
+    if (!fileBuffer) {
+      const fileObj = await storageService.getFile(String(repo._id), branchName, filePath, fileNode?.storage?.fileId);
+      fileBuffer = fileObj.buffer;
+      fileContentType = fileObj.contentType || fileContentType;
+    }
+
+    res.setHeader('Content-Type', fileContentType);
+    res.setHeader('Content-Length', fileBuffer.length);
+    res.send(fileBuffer);
   } catch (err) {
     res.status(404).send('File not found: ' + err.message);
   }
@@ -225,10 +266,16 @@ router.get('/:owner/:repo/download/:branch', optionalAuth, async (req, res) => {
         const results = await Promise.all(
           batch.map(async (fileNode) => {
             try {
-              const fileObj = await storageService.getFile(String(repo._id), branchName, fileNode.path, fileNode.storage?.fileId);
+              let buffer = null;
+              if (fileNode.contentBase64) {
+                buffer = Buffer.from(fileNode.contentBase64, 'base64');
+              } else {
+                const fileObj = await storageService.getFile(String(repo._id), branchName, fileNode.path, fileNode.storage?.fileId);
+                buffer = fileObj.buffer;
+              }
               return {
                 path: `${rootFolder}/${fileNode.path.replace(/^\/+/, '')}`,
-                buffer: fileObj.buffer,
+                buffer,
                 date: fileNode.lastCommitDate || fileNode.updatedAt || new Date()
               };
             } catch (e) {
@@ -311,18 +358,24 @@ router.post('/:owner/:repo/build-apk', requireAuth, upload.single('icon'), async
     const webFiles = [];
     let detectedIconBuffer = req.file ? req.file.buffer : null;
 
-    // Download web files in parallel batches of 6 using direct Google Drive fileId
+    // Download web files in parallel batches of 6 using database contentBase64 or direct Google Drive fileId
     const batchSize = 6;
     for (let i = 0; i < candidateNodes.length; i += batchSize) {
       const batch = candidateNodes.slice(i, i + batchSize);
       const loaded = await Promise.all(
         batch.map(async (node) => {
           try {
-            const fileObj = await storageService.getFile(String(repo._id), branch, node.path, node.storage?.fileId);
+            let buffer = null;
+            if (node.contentBase64) {
+              buffer = Buffer.from(node.contentBase64, 'base64');
+            } else {
+              const fileObj = await storageService.getFile(String(repo._id), branch, node.path, node.storage?.fileId);
+              buffer = fileObj.buffer;
+            }
             const relAssetPath = basePrefix && node.path.startsWith(basePrefix)
               ? node.path.slice(basePrefix.length)
               : node.path;
-            return { path: relAssetPath, buffer: fileObj.buffer };
+            return { path: relAssetPath, buffer };
           } catch (_) {
             return null;
           }
@@ -362,16 +415,28 @@ router.post('/:owner/:repo/build-apk', requireAuth, upload.single('icon'), async
     };
 
     const apkMimeType = 'application/vnd.android.package-archive';
-    const storageRef = await storageService.uploadFile(
-      String(repo._id),
-      branch,
-      apkFileName,
-      apkBuffer,
-      apkMimeType
-    );
+    let storageRef = null;
+    try {
+      storageRef = await storageService.uploadFile(
+        String(repo._id),
+        branch,
+        apkFileName,
+        apkBuffer,
+        apkMimeType
+      );
+    } catch (uploadErr) {
+      console.warn('[Build APK] Google Drive upload notice:', uploadErr.message);
+      storageRef = {
+        provider: 'google-drive-fallback',
+        key: `${repo._id}/${branch}/${apkFileName}`,
+        size: apkBuffer.length,
+        contentType: apkMimeType
+      };
+    }
 
     const timestamp = new Date();
     const commitMessage = `Build Android APK: ${apkFileName} (v${version})`;
+    const apkBase64 = apkBuffer.toString('base64');
     const existingApk = await FileNode.findOne({
       repoId: String(repo._id),
       branch,
@@ -386,6 +451,7 @@ router.post('/:owner/:repo/build-apk', requireAuth, upload.single('icon'), async
             size: apkBuffer.length,
             mimeType: apkMimeType,
             storage: storageRef,
+            contentBase64: apkBase64,
             lastCommitMessage: commitMessage,
             lastCommitAuthor: commitAuthor.username,
             lastCommitDate: timestamp,
@@ -403,6 +469,7 @@ router.post('/:owner/:repo/build-apk', requireAuth, upload.single('icon'), async
         size: apkBuffer.length,
         mimeType: apkMimeType,
         storage: storageRef,
+        contentBase64: apkBase64,
         lastCommitMessage: commitMessage,
         lastCommitAuthor: commitAuthor.username,
         lastCommitDate: timestamp,
@@ -486,14 +553,25 @@ router.post(['/:owner/:repo/upload', '/:owner/:repo/upload/:branch'], requireAut
       let relPath = (paths[i] || file.originalname).replace(/^\/+/, '').replace(/\\/g, '/');
       const mimeType = file.mimetype || mime.lookup(relPath) || 'application/octet-stream';
 
-      // 1. Upload to Filebase S3, preserving complete repository path
-      const storageRef = await storageService.uploadFile(
-        String(repo._id),
-        branch,
-        relPath,
-        file.buffer,
-        mimeType
-      );
+      // 1. Upload to cloud storage (with safe fallback)
+      let storageRef = null;
+      try {
+        storageRef = await storageService.uploadFile(
+          String(repo._id),
+          branch,
+          relPath,
+          file.buffer,
+          mimeType
+        );
+      } catch (err) {
+        console.warn(`[Upload] Cloud storage notice: ${err.message}`);
+        storageRef = {
+          provider: 'database-direct',
+          key: `${repo._id}/${branch}/${relPath}`,
+          size: file.buffer.length,
+          contentType: mimeType
+        };
+      }
 
       // Check existing FileNode
       const existing = await FileNode.findOne({
@@ -513,6 +591,8 @@ router.post(['/:owner/:repo/upload', '/:owner/:repo/upload/:branch'], requireAut
         deletions: 0
       });
 
+      const b64 = file.buffer.length <= 15 * 1024 * 1024 ? file.buffer.toString('base64') : null;
+
       if (existing) {
         await FileNode.updateOne(
           { _id: existing._id },
@@ -521,6 +601,7 @@ router.post(['/:owner/:repo/upload', '/:owner/:repo/upload/:branch'], requireAut
               size: file.buffer.length,
               mimeType,
               storage: storageRef,
+              ...(b64 ? { contentBase64: b64 } : {}),
               lastCommitMessage: message,
               lastCommitAuthor: req.user.username,
               lastCommitDate: timestamp,
@@ -538,6 +619,7 @@ router.post(['/:owner/:repo/upload', '/:owner/:repo/upload/:branch'], requireAut
           size: file.buffer.length,
           mimeType,
           storage: storageRef,
+          ...(b64 ? { contentBase64: b64 } : {}),
           lastCommitMessage: message,
           lastCommitAuthor: req.user.username,
           lastCommitDate: timestamp,
@@ -595,14 +677,25 @@ router.post('/:owner/:repo/create', requireAuth, async (req, res) => {
     const commitMessage = message || `Create ${path.basename(cleanPath)}`;
     const mimeType = mime.lookup(cleanPath) || 'text/plain';
 
-    // 1. Upload to Filebase S3
-    const storageRef = await storageService.uploadFile(
-      String(repo._id),
-      branch,
-      cleanPath,
-      content,
-      mimeType
-    );
+    // 1. Upload to cloud storage (with safe fallback)
+    let storageRef = null;
+    try {
+      storageRef = await storageService.uploadFile(
+        String(repo._id),
+        branch,
+        cleanPath,
+        content,
+        mimeType
+      );
+    } catch (err) {
+      console.warn(`[Create] Cloud storage notice: ${err.message}`);
+      storageRef = {
+        provider: 'database-direct',
+        key: `${repo._id}/${branch}/${cleanPath}`,
+        size: Buffer.byteLength(content),
+        contentType: mimeType
+      };
+    }
 
     // 2. Commit
     const lines = content.split('\n').length;
@@ -620,6 +713,8 @@ router.post('/:owner/:repo/create', requireAuth, async (req, res) => {
       }]
     });
 
+    const b64 = Buffer.byteLength(content) <= 15 * 1024 * 1024 ? Buffer.from(content).toString('base64') : null;
+
     // 3. Save FileNode
     const node = await FileNode.create({
       repoId: String(repo._id),
@@ -630,6 +725,7 @@ router.post('/:owner/:repo/create', requireAuth, async (req, res) => {
       size: Buffer.byteLength(content),
       mimeType,
       storage: storageRef,
+      ...(b64 ? { contentBase64: b64 } : {}),
       lastCommitSha: commit.sha,
       lastCommitMessage: commitMessage,
       lastCommitAuthor: req.user.username,
@@ -667,20 +763,36 @@ router.put('/:owner/:repo/edit', requireAuth, async (req, res) => {
     // Get old content for diff
     let oldContent = '';
     try {
-      const oldObj = await storageService.getFile(String(repo._id), branch, sourcePathForOld);
-      oldContent = oldObj.buffer.toString('utf8');
+      const oldNode = await FileNode.findOne({ repoId: String(repo._id), branch, path: sourcePathForOld });
+      if (oldNode?.contentBase64) {
+        oldContent = Buffer.from(oldNode.contentBase64, 'base64').toString('utf8');
+      } else {
+        const oldObj = await storageService.getFile(String(repo._id), branch, sourcePathForOld, oldNode?.storage?.fileId);
+        oldContent = oldObj.buffer.toString('utf8');
+      }
     } catch (_) {}
 
     const { additions, deletions, patch } = gitService.computeDiff(oldContent, content, cleanPath);
 
-    // 1. Upload updated content to Filebase S3
-    const storageRef = await storageService.uploadFile(
-      String(repo._id),
-      branch,
-      cleanPath,
-      content,
-      mimeType
-    );
+    // 1. Upload updated content to cloud storage (with safe fallback)
+    let storageRef = null;
+    try {
+      storageRef = await storageService.uploadFile(
+        String(repo._id),
+        branch,
+        cleanPath,
+        content,
+        mimeType
+      );
+    } catch (err) {
+      console.warn(`[Edit] Cloud storage notice: ${err.message}`);
+      storageRef = {
+        provider: 'database-direct',
+        key: `${repo._id}/${branch}/${cleanPath}`,
+        size: Buffer.byteLength(content),
+        contentType: mimeType
+      };
+    }
 
     // 2. If renamed, delete old file from Filebase and DB
     if (isRename) {
@@ -727,6 +839,8 @@ router.put('/:owner/:repo/edit', requireAuth, async (req, res) => {
       filesChanged
     });
 
+    const b64 = Buffer.byteLength(content) <= 15 * 1024 * 1024 ? Buffer.from(content).toString('base64') : null;
+
     // 4. Update or create FileNode
     const existingNode = await FileNode.findOne({ repoId: String(repo._id), branch, path: cleanPath });
     if (existingNode) {
@@ -737,6 +851,7 @@ router.put('/:owner/:repo/edit', requireAuth, async (req, res) => {
             size: Buffer.byteLength(content),
             mimeType,
             storage: storageRef,
+            ...(b64 ? { contentBase64: b64 } : {}),
             lastCommitSha: commit.sha,
             lastCommitMessage: commitMessage,
             lastCommitAuthor: req.user.username,
@@ -755,6 +870,7 @@ router.put('/:owner/:repo/edit', requireAuth, async (req, res) => {
         size: Buffer.byteLength(content),
         mimeType,
         storage: storageRef,
+        ...(b64 ? { contentBase64: b64 } : {}),
         lastCommitSha: commit.sha,
         lastCommitMessage: commitMessage,
         lastCommitAuthor: req.user.username,
